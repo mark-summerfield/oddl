@@ -9,7 +9,8 @@ if __name__ == '__main__':
     import pathlib
     import sys
 
-    USAGE = f'''\
+    if len(sys.argv) == 1 or sys.argv[1] in {'h', 'help', '-h', '--help'}:
+        raise SystemExit(f'''\
 usage: {pathlib.Path(sys.argv[0]).name} \
 [lint|minimize|pretty] <file1.oddl> [<file2.oddl> [... <fileN.oddl>]]
  -or-: {pathlib.Path(sys.argv[0]).name} help
@@ -23,9 +24,7 @@ p pretty   : insert newlines and whitespace to make each .oddl file
 
 Letter options may be prefixed by - and word options by -- e.g., \
 -m or --pretty
-'''
-    if len(sys.argv) == 1 or sys.argv[1] in {'h', 'help', '-h', '--help'}:
-        raise SystemExit(USAGE)
+''')
 
 
     def lint(filename):
