@@ -11,7 +11,7 @@ match = re.search(r"__version__\s*=\s*'(?P<version>.*?)'", INIT)
 VERSION = match.group('version')
 
 setuptools.setup(
-    name='oddl',
+    name='oddl3',
     version=VERSION,
     author='Mark Summerfield',
     author_email='mark@qtrac.eu',
@@ -30,6 +30,7 @@ setuptools.setup(
         'Topic :: Multimedia :: Graphics',
         'Topic :: Software Development :: Libraries',
     ],
-    packages=['oddl'],
+    py_modules=['oddl'],
+    scripts=['oddl.py'],
     python_requires='>=3.8',
 )

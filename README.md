@@ -12,15 +12,12 @@ OpenDLL (`.oddl`) files.
 
 The only dependencies are Python's standard library.
 
-PyPI: https://pypi.org/project/oddl/
+PyPI: https://pypi.org/project/oddl3/
 
 Install:
 ```
-python3 -m pip install oddl
+python3 -m pip install oddl3
 ````
-
-## Examples
-
 
 ## License
 
