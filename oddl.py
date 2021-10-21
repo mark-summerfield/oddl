@@ -2,7 +2,6 @@
 # Copyright © 2021 Mark Summerfield. All rights reserved.
 # License: GPLv3
 
-import enum
 import io
 import re
 import sys
@@ -10,64 +9,95 @@ import sys
 __version__ = '0.1.1'
 
 
-@enum.unique
-class OutOpts(enum.Enum):
-    MINIMIZE = 1
-    PRETTY = 2
+def check(filename):
+    oddl = Oddl(filename)
+    oddl.check()
 
 
-def lint(filename):
-    with open(filename, 'rt', encoding='utf-8') as file:
-        lints(file.read())
+class Oddl:
 
-
-def lints(text):
-    parser = _Parser()
-    structures = parser.parse(text)
-    # TODO do lint checks
-    print(structures) # NOTE DEBUG
-
-
-def load(filename):
-    with open(filename, 'rt', encoding='utf-8') as file:
-        return loads(file.read())
-
-
-def loads(text):
-    parser = _Parser()
-    return parser.parse(text)
-
-
-def save(filename, structures, *, outopts=OutOpts.PRETTY):
-    with open(filename, 'wt', encoding='utf-8') as file:
-        write(file, structures, outopts)
-
-
-dump = save
-
-
-def dumps(structures, *, outopts=OutOpts.PRETTY):
-    out = io.StringIO()
-    try:
-        write(out, structures, outopts)
-        return out.getvalue()
-    finally:
-        out.close()
-
-
-def write(out, structures, outopts):
-    pass # TODO
-
-
-class _Parser:
-
-    def __init__(self):
+    def __init__(self, filename=None):
         self.clear()
+        if filename is not None:
+            self.filename = filename
+            self.load()
 
 
     def clear(self):
         self.globals = {} # NOTE or set?
         self.structures = []
+
+
+    def load(self, filename=None):
+        filename = filename or self.filename
+        with open(filename, 'rt', encoding='utf-8') as file:
+            self.loads(file.read())
+
+
+    def loads(self, text):
+        parser = _Parser(self)
+        parser.parse(text)
+
+
+    def save(self, filename=None):
+        filename = filename or self.filename
+        with open(filename, 'wt', encoding='utf-8') as file:
+            self.write(file)
+
+
+    dump = save
+
+
+    def dumps(self):
+        out = io.StringIO()
+        try:
+            self.write(out)
+            return out.getvalue()
+        finally:
+            out.close()
+
+
+    def write(self, out):
+        pass # TODO
+
+
+    def _debug(self):
+        # TODO delete
+        for i, structure in enumerate(self.structures):
+            print(f'#{i}: {structure.__class__.__name__} '
+                  f'{vars(structure)}\n')
+
+
+    def check(self):
+        pass  # TODO
+
+
+    lint = check
+
+
+class Structure:
+
+    def __init__(self, typename):
+        self.typename = typename # built-in or user-defined identifier
+
+
+class PrimitiveStructure(Structure):
+    pass
+
+
+class DerivedStructure(Structure):
+    pass
+
+
+class _Parser:
+
+    def __init__(self, oddl):
+        self.oddl = oddl
+        self.clear()
+
+
+    def clear(self):
+        self.oddl.clear()
         self.text = ''
         self.pos = 0
         self.lino = 1
@@ -79,7 +109,6 @@ class _Parser:
         self.text = text.rstrip()
         while self.pos < len(self.text):
             self.parse_structure()
-        return self.structures
 
 
     def parse_structure(self):
@@ -96,7 +125,7 @@ class _Parser:
         if match is not None:
             typename = match[0]
             self.pos += len(typename)
-            self.structures.append(PrimitiveStructure(typename))
+            self.oddl.structures.append(PrimitiveStructure(typename))
             self.parse_primitive_structure_data()
         else:
             match = _RESERVED_STRUCTURE_ID_RX.match(text)
@@ -106,7 +135,7 @@ class _Parser:
             if match is not None:
                 typename = match[0]
                 self.pos += len(typename)
-                self.structures.append(DerivedStructure(typename))
+                self.oddl.structures.append(DerivedStructure(typename))
                 self.parse_derived_structure_data()
             else:
                 self.error('primitive or derived structure expected')
@@ -151,6 +180,7 @@ class _Parser:
 
 
     def error(self, message):
+        self.oddl._debug() # TODO delete
         raise Error(f'error [{self.lino}.{self.pos}]: {message!r}')
 
 
@@ -159,22 +189,7 @@ class _Parser:
               file=sys.stderr)
 
 
-
 class Error(Exception):
-    pass
-
-
-class Structure:
-
-    def __init__(self, typename):
-        self.typename = typename # built-in or user-defined identifier
-
-
-class PrimitiveStructure(Structure):
-    pass
-
-
-class DerivedStructure(Structure):
     pass
 
 
@@ -193,42 +208,19 @@ if __name__ == '__main__':
     if len(sys.argv) == 1 or sys.argv[1] in {'h', 'help', '-h', '--help'}:
         raise SystemExit(f'''\
 usage: {pathlib.Path(sys.argv[0]).name} \
-[lint|minimize|pretty] <file1.oddl> [<file2.oddl> [... <fileN.oddl>]]
+[check] <file1.oddl> [<file2.oddl> [... <fileN.oddl>]]
  -or-: {pathlib.Path(sys.argv[0]).name} help
 
-h help     : show this usage and quit.
-l lint     : check each .oddl file and report any problems (easiest to use
-             after pretty); this is the default action.
-m minimize : remove all redundant whitespace and all comments from each
-             .oddl file.
-p pretty   : insert newlines and whitespace to make each .oddl file
-             human-readable.
+h help         : show this usage and quit.
+l lint c check : check each .oddl file and report any problems (this is the
+                 default action).
 
-Letter options may be prefixed by - and word options by -- e.g., \
--m or --pretty
+Letter options may be prefixed by - and word options by -- e.g., -l or \
+--lint
 ''')
-
-
-    def minimize(filename):
-        structures = load(filename)
-        save(filename, structures, outopts=OutOpts.MINIMIZE)
-
-
-    def pretty(filename):
-        structures = load(filename)
-        save(filename, structures, outopts=OutOpts.PRETTY)
-
-
-    action = lint
-    index = 1
-    arg = sys.argv[index]
-    if arg in {'m', 'minimize', '-m', '--minimize'}:
-        action = minimize
-        index += 1
-    elif arg in {'p', 'pretty', '-p', '--pretty'}:
-        action = pretty
-        index += 1
-    elif arg in {'l', 'lint', '-l', '--lint'}:
-        index += 1
-    for filename in sys.argv[index:]:
-        action(filename)
+    args = sys.argv[1:]
+    if args[0] in {'l', 'lint', '-l', '--lint', 'c', 'check', '-c',
+                   '--check'}:
+        args = args[1:]
+    for filename in args:
+        check(filename)
