@@ -61,11 +61,11 @@ class Oddl:
         pass # TODO
 
 
-    def _debug(self):
-        # TODO delete
+    def __repr__(self): # TODO this is used for debugging right now
+        parts = []
         for i, structure in enumerate(self.structures):
-            print(f'#{i}: {structure.__class__.__name__} '
-                  f'{vars(structure)}\n')
+            parts.append(f'#{i}: {structure}')
+        return '\n'.join(parts)
 
 
     def check(self):
@@ -82,6 +82,11 @@ class Structure:
         self.name = None
 
 
+    def __repr__(self): # TODO this is used for debugging right now
+        return (f'{self.__class__.__name__}({self.typename}) '
+                f'name={self.name}')
+
+
 class PrimitiveStructure(Structure):
     pass
 
@@ -91,6 +96,15 @@ class DerivedStructure(Structure):
     def __init__(self, typename):
         super().__init__(typename)
         self.structures = []
+        self.properties = {}
+
+
+    def __repr__(self): # TODO this is used for debugging right now
+        parts = [super().__repr__(), 'structures=[']
+        for structure in self.structures:
+            parts.append(repr(structure))
+        parts += [']', 'properties=', str(self.properties)]
+        return '\n'.join(parts)
 
 
 class _Parser:
@@ -191,12 +205,11 @@ class _Parser:
         name = self.parse_name(optional=True)
         if name:
             self.structures[-1].name = name
-        # TODO
-        # parse_properties(optional=True)
-        # text = self.expected('{')
-        # while self.pos < len(self.text):
-        #   self.parse_structure(optional=True)
-        # self.expected('}')
+        self.parse_property_list(optional=True)
+        text = self.expected('{')
+        while self.pos < len(self.text):
+            self.parse_structure(optional=True)
+        self.expected('}')
 
 
     def parse_name(self, *, optional=False):
@@ -211,6 +224,19 @@ class _Parser:
         name = match[0]
         self.pos += len(name)
         return name
+
+
+    def parse_property_list(self, *, optional=False):
+        text = self.advance(optional, 'expected one or more properties')
+        if not text:
+            return
+        if text[0] == '(':
+            self.parse_properties()
+            self.expected(')')
+
+
+    def parse_properties(self):
+        pass # TODO
 
 
     def expected(self, what):
@@ -255,7 +281,7 @@ class _Parser:
 
 
     def error(self, message):
-        self.oddl._debug() # TODO delete
+        print(self.oddl) # TODO delete
         raise Error(f'error [{self.lino}.{self.pos}]: {message!r}')
 
 
