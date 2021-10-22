@@ -24,7 +24,7 @@ class Oddl:
 
 
     def clear(self):
-        self.globals = {} # NOTE or set?
+        self.global_names = set()
         self.structures = []
 
 
@@ -79,6 +79,7 @@ class Structure:
 
     def __init__(self, typename):
         self.typename = typename # built-in or user-defined identifier
+        self.name = None
 
 
 class PrimitiveStructure(Structure):
@@ -86,7 +87,10 @@ class PrimitiveStructure(Structure):
 
 
 class DerivedStructure(Structure):
-    pass
+
+    def __init__(self, typename):
+        super().__init__(typename)
+        self.structures = []
 
 
 class _Parser:
@@ -101,6 +105,7 @@ class _Parser:
         self.text = ''
         self.pos = 0
         self.lino = 1
+        self.structures = [self.oddl.structures]
 
 
     def parse(self, text):
@@ -108,10 +113,10 @@ class _Parser:
         self.clear()
         self.text = text.rstrip()
         while self.pos < len(self.text):
-            self.parse_structure()
+            self.parse_structure(optional=True)
 
 
-    def parse_structure(self):
+    def parse_structure(self, *, optional=False):
         # structure ::=
         #   data-type (name? "{" data-list? "}"
         #              | "[" integer-literal "]" "*"? name?
@@ -119,14 +124,16 @@ class _Parser:
         #   |
         #   identifier name? ("(" (property ("," property)*)? ")")?
         #                     "{" structure* "}"
-        self.wsc()
-        text = self.text[self.pos:]
+        text = self.advance(optional, 'structure expected')
+        if not text:
+            return
         match = _DATA_TYPE_RX.match(text)
         if match is not None:
             typename = match[0]
             self.pos += len(typename)
-            self.oddl.structures.append(PrimitiveStructure(typename))
-            self.parse_primitive_structure_data()
+            # Append to current structure's list of structures
+            self.structures[-1].append(PrimitiveStructure(typename))
+            self.parse_primitive_structure_content()
         else:
             match = _RESERVED_STRUCTURE_ID_RX.match(text)
             if match is not None:
@@ -135,27 +142,95 @@ class _Parser:
             if match is not None:
                 typename = match[0]
                 self.pos += len(typename)
-                self.oddl.structures.append(DerivedStructure(typename))
-                self.parse_derived_structure_data()
+                # Append to current structure's list of structures and make
+                # this structure the new current structure when parsing its
+                # content since DerivedStructures can nest
+                structure = DerivedStructure(typename)
+                self.structures[-1].append(structure)
+                self.structures.append(structure.structures)
+                self.parse_derived_structure_content()
+                self.structures.pop()
             else:
                 self.error('primitive or derived structure expected')
 
 
-    def parse_primitive_structure_data(self):
-        # name? "{" data-list? "}"
-        # |
+    def parse_primitive_structure_content(self, *, optional=False):
         # "[" integer-literal "]" "*"? name? "{" data-array-list? "}"
-        self.wsc()
-        pass # TODO
+        # |
+        # name? "{" data-list? "}"
+        text = self.advance(optional,
+                            'expected primitive structure content')
+        if not text:
+            return
+        if text[0] == '[':
+            text = self.expected('[')
+            # TODO parse_int ...
+            # if text[0] != ']':
+            #   self.error(...)
+            # optional star
+            # name = self.parse_name(optional=True)
+            # if name:
+            #   pass # where does this name go?
+            # text = self.expected('{')
+            # parse optional data-array-list
+            # self.expected('}')
+        else:
+            name = self.parse_name(optional=True)
+            if name:
+                self.structures[-1].name = name
+            # text = self.expected('{')
+            # TODO parse_data_list(optional=True)
+            # self.expected('}')
 
 
-    def parse_derived_structure_data(self):
+    def parse_derived_structure_content(self, *, optional=False):
         # name? ("(" (property ("," property)*)? ")")? "{" structure* "}"
-        self.wsc()
-        pass # TODO
+        text = self.advance(optional, 'expected derived structure content')
+        if not text:
+            return
+        name = self.parse_name(optional=True)
+        if name:
+            self.structures[-1].name = name
+        # TODO
+        # parse_properties(optional=True)
+        # text = self.expected('{')
+        # while self.pos < len(self.text):
+        #   self.parse_structure(optional=True)
+        # self.expected('}')
 
 
-    def wsc(self):
+    def parse_name(self, *, optional=False):
+        text = self.advance(optional, 'expected name')
+        if not text:
+            return
+        match = _NAME_RX.match(text)
+        if match is None:
+            if optional:
+                return
+            self.error('expected name')
+        name = match[0]
+        self.pos += len(name)
+        return name
+
+
+    def expected(self, what):
+        self.skip_ws_and_comments()
+        text = self.text[self.pos:]
+        if not text or not text.startswith(what):
+            self.error(f'expected {what!r}')
+        self.pos += len(what)
+        return self.text[self.pos:]
+
+
+    def advance(self, optional, message):
+        self.skip_ws_and_comments()
+        text = self.text[self.pos:]
+        if not text and not optional:
+            self.error(message)
+        return text
+
+
+    def skip_ws_and_comments(self):
         text = self.text[self.pos:]
         match = _WS_RX.match(text)
         if match is not None:
@@ -171,12 +246,12 @@ class _Parser:
                 return
             self.lino += 1
             self.pos = i + 1
-            self.wsc() # if the next line starts with whitespace or comment
+            self.skip_ws_and_comments() # for the next line...
         elif text.startswith('/*'):
             i = self.text.find('*/', self.pos)
             self.lino += self.text.count('\n', self.pos, i)
             self.pos = i + 1
-            self.wsc() # if the next line starts with whitespace or comment
+            self.skip_ws_and_comments() # for the next line...
 
 
     def error(self, message):
@@ -194,11 +269,12 @@ class Error(Exception):
 
 
 _RESERVED_STRUCTURE_ID_RX = re.compile(r'[a-z]\d*')
-_DATA_TYPE_RX = re.compile(
-    r'(?:b|base64|bool|d|double|f|f16|f32|f64|float|float16|float32|'
-    r'float64|h|half|i16|i32|i64|i8|int16|int32|int64|int8|r|ref|s|string|'
-    r't|type|u16|u32|u64|u8|uint16|uint32|uint64|uint8|z)')
+_DATA_TYPE_RX = re.compile( # Must be ordered longest to shortest
+    r'(:?float16|float32|float64|base64|uint16|uint32|uint64|string|double|'
+    r'float|int16|int32|int64|uint8|int8|bool|half|type|f16|u32|u64|f32|'
+    r'f64|i16|i32|i64|u16|ref|i8|u8|b|d|f|h|r|s|t|z)')
 _ID_RX = re.compile(r'[A-Za-z_][0-9A-Za-z_]*')
+_NAME_RX = re.compile(r'[%$][A-Za-z_][0-9A-Za-z_]*')
 _WS_RX = re.compile(r'[\s\n]+', re.DOTALL | re.MULTILINE)
 
 
