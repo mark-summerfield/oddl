@@ -300,7 +300,16 @@ class _Parser:
 
     def error(self, message):
         print(self.oddl) # TODO delete
-        raise Error(f'error [{self.lino}]: {message!r}')
+        if self.lino == 1:
+            j = -1
+        else:
+            i = j = self.text.find('\n')
+            while True:
+                i = self.text.find('\n', i + 1)
+                if i == -1 or i > self.pos:
+                    break
+                j = i - 1
+        raise Error(f'error [{self.lino}.{self.pos - j}]: {message!r}')
 
 
     def warning(self, message):
