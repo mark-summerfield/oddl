@@ -300,6 +300,16 @@ class _Parser:
 
     def error(self, message):
         print(self.oddl) # TODO delete
+        raise Error(f'error [{self.lino}.{self.column}]: {message!r}')
+
+
+    def warning(self, message):
+        print(f'warning [{self.lino}.{self.column}]: {message!r}',
+              file=sys.stderr)
+
+
+    @property
+    def column(self):
         if self.lino == 1:
             j = -1
         else:
@@ -309,12 +319,7 @@ class _Parser:
                 if i == -1 or i > self.pos:
                     break
                 j = i - 1
-        raise Error(f'error [{self.lino}.{self.pos - j}]: {message!r}')
-
-
-    def warning(self, message):
-        print(f'warning [{self.lino}]: {message!r}',
-              file=sys.stderr)
+        return self.pos - j
 
 
 class Error(Exception):
