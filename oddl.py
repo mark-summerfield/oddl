@@ -9,11 +9,6 @@ import sys
 __version__ = '0.1.1'
 
 
-def check(filename):
-    oddl = Oddl(filename)
-    oddl.check()
-
-
 class Oddl:
 
     def __init__(self, filename=None):
@@ -103,7 +98,7 @@ class DerivedStructure(Structure):
         parts = [super().__repr__(), 'structures=[']
         for structure in self.structures:
             parts.append(repr(structure))
-        parts += [']', 'properties=', str(self.properties)]
+        parts += [']', f'properties={self.properties}']
         return '\n'.join(parts)
 
 
@@ -119,7 +114,12 @@ class _Parser:
         self.text = ''
         self.pos = 0
         self.lino = 1
-        self.structures = [self.oddl.structures]
+        self.stack = [self.oddl]
+
+
+    @property
+    def current(self):
+        return self.stack[-1]
 
 
     def parse(self, text):
@@ -146,7 +146,7 @@ class _Parser:
             typename = match[0]
             self.pos += len(typename)
             # Append to current structure's list of structures
-            self.structures[-1].append(PrimitiveStructure(typename))
+            self.current.structures.append(PrimitiveStructure(typename))
             self.parse_primitive_structure_content()
         else:
             match = _RESERVED_STRUCTURE_ID_RX.match(text)
@@ -160,10 +160,10 @@ class _Parser:
                 # this structure the new current structure when parsing its
                 # content since DerivedStructures can nest
                 structure = DerivedStructure(typename)
-                self.structures[-1].append(structure)
-                self.structures.append(structure.structures)
+                self.current.structures.append(structure)
+                self.stack.append(structure)
                 self.parse_derived_structure_content()
-                self.structures.pop()
+                self.stack.pop()
             else:
                 self.error('primitive or derived structure expected')
 
@@ -177,7 +177,7 @@ class _Parser:
         if not text:
             return
         if text[0] == '[':
-            text = self.expected('[')
+            text = self.expect('[')
             # TODO parse_int ...
             # if text[0] != ']':
             #   self.error(...)
@@ -185,16 +185,16 @@ class _Parser:
             # name = self.parse_name(optional=True)
             # if name:
             #   pass # where does this name go?
-            # text = self.expected('{')
+            # text = self.expect('{')
             # parse optional data-array-list
-            # self.expected('}')
+            # self.expect('}')
         else:
             name = self.parse_name(optional=True)
             if name:
-                self.structures[-1].name = name
-            # text = self.expected('{')
+                self.current.name = name
+            # text = self.expect('{')
             # TODO parse_data_list(optional=True)
-            # self.expected('}')
+            # self.expect('}')
 
 
     def parse_derived_structure_content(self, *, optional=False):
@@ -204,12 +204,12 @@ class _Parser:
             return
         name = self.parse_name(optional=True)
         if name:
-            self.structures[-1].name = name
+            self.current.name = name
         self.parse_property_list(optional=True)
-        text = self.expected('{')
+        text = self.expect('{')
         while self.pos < len(self.text):
             self.parse_structure(optional=True)
-        self.expected('}')
+        self.expect('}')
 
 
     def parse_name(self, *, optional=False):
@@ -229,17 +229,35 @@ class _Parser:
     def parse_property_list(self, *, optional=False):
         text = self.advance(optional, 'expected one or more properties')
         if not text:
-            return
+            if optional:
+                return
+            self.error('expected one or more properties')
         if text[0] == '(':
-            self.parse_properties()
-            self.expected(')')
+            self.pos += 1
+            text = text[1:]
+            i = text.find(')', 1)
+            if i == -1:
+                self.error('property list missing closing \')\'')
+            for prop in (p.strip() for p in text[:i].split(',')):
+                prop = prop.split('=', 1)
+                name = prop[0].strip()
+                value = (self.parse_property_value(prop[1])
+                         if len(prop) == 2 else True)
+                self.current.properties[name] = value
+            self.pos += i
+            self.expect(')')
+        elif not optional:
+            self.error('expected \'(\' to begin property list')
 
 
-    def parse_properties(self):
-        pass # TODO
+    def parse_property_value(self, value):
+        # (bool-literal | integer-literal | float-literal | string-literal |
+        # reference | data-type | base64-data)
+        value = value.strip()
+        return value # TODO
 
 
-    def expected(self, what):
+    def expect(self, what):
         self.skip_ws_and_comments()
         text = self.text[self.pos:]
         if not text or not text.startswith(what):
@@ -261,7 +279,7 @@ class _Parser:
         match = _WS_RX.match(text)
         if match is not None:
             ws = match[0]
-            self.lino = ws.count('\n')
+            self.lino += ws.count('\n')
             self.pos += len(ws)
             text = self.text[self.pos:]
         if text.startswith('//'):
@@ -325,4 +343,4 @@ Letter options may be prefixed by - and word options by -- e.g., -l or \
                    '--check'}:
         args = args[1:]
     for filename in args:
-        check(filename)
+        Oddl(filename).check()
