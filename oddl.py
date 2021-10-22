@@ -300,11 +300,11 @@ class _Parser:
 
     def error(self, message):
         print(self.oddl) # TODO delete
-        raise Error(f'error [{self.lino}.{self.pos}]: {message!r}')
+        raise Error(f'error [{self.lino}]: {message!r}')
 
 
     def warning(self, message):
-        print(f'warning [{self.lino}.{self.pos}]: {message!r}',
+        print(f'warning [{self.lino}]: {message!r}',
               file=sys.stderr)
 
 
