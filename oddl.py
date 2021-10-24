@@ -2,10 +2,12 @@
 # Copyright © 2021 Mark Summerfield. All rights reserved.
 # License: GPLv3
 
+import base64
 import io
 import re
 import sys
 
+__all__ = ('Oddl',)
 __version__ = '0.1.1'
 
 
@@ -30,7 +32,7 @@ class Oddl:
 
 
     def loads(self, text):
-        parser = _Parser(self)
+        parser = Parser(self)
         parser.parse(text)
 
 
@@ -70,6 +72,52 @@ class Oddl:
     lint = check
 
 
+class Base64Data(bytes):
+
+    def __new__(Class, value):
+        message = ''
+        match = BASE64_DATA_RX.fullmatch(value)
+        if match is not None:
+            try:
+                return super().__new__(Class, base64.b64decode(
+                                       match[0].encode('utf-8')))
+            except base64.Error as err:
+                message = f' {err}'
+        raise Error(f'invalid base-64-data{message}: {value!r}')
+
+
+class DataType(str):
+
+    def __new__(Class, value):
+        match = DATA_TYPE_RX.fullmatch(value)
+        if match is not None:
+            return super().__new__(Class, match[0])
+        raise Error(f'invalid data-type: {value!r}')
+
+
+class Name(str):
+
+    def __new__(Class, value):
+        match = NAME_RX.fullmatch(value)
+        if match is not None:
+            return super().__new__(Class, match[0])
+        raise Error(f'invalid name: {value!r}')
+
+
+class Reference(str):
+
+    def __new__(Class, value):
+        match = REFERENCE_RX.fullmatch(value)
+        if match is not None:
+            return super().__new__(Class, match[0])
+        raise Error(f'invalid reference: {value!r}')
+
+
+    @property
+    def isnull(self):
+        return self == 'null'
+
+
 class Structure:
 
     def __init__(self, typename):
@@ -102,7 +150,7 @@ class DerivedStructure(Structure):
         return '\n'.join(parts)
 
 
-class _Parser:
+class Parser:
 
     def __init__(self, oddl):
         self.oddl = oddl
@@ -141,7 +189,7 @@ class _Parser:
         text = self.advance(optional, 'structure expected')
         if not text:
             return
-        match = _DATA_TYPE_RX.match(text)
+        match = DATA_TYPE_RX.match(text)
         if match is not None:
             typename = match[0]
             self.pos += len(typename)
@@ -149,10 +197,10 @@ class _Parser:
             self.current.structures.append(PrimitiveStructure(typename))
             self.parse_primitive_structure_content()
         else:
-            match = _RESERVED_STRUCTURE_ID_RX.match(text)
+            match = RESERVED_STRUCTURE_ID_RX.match(text)
             if match is not None:
                 self.error(f'illegal structure name {match[0]}')
-            match = _ID_RX.match(text)
+            match = ID_RX.match(text)
             if match is not None:
                 typename = match[0]
                 self.pos += len(typename)
@@ -216,7 +264,7 @@ class _Parser:
         text = self.advance(optional, 'expected name')
         if not text:
             return
-        match = _NAME_RX.match(text)
+        match = NAME_RX.match(text)
         if match is None:
             if optional:
                 return
@@ -253,8 +301,27 @@ class _Parser:
     def parse_property_value(self, value):
         # (bool-literal | integer-literal | float-literal | string-literal |
         # reference | data-type | base64-data)
+        return self.parse_value(value, {bool, int, float, str, Reference,
+                                        DataType, Base64Data}, 'property')
+
+
+    def parse_value(self, value, types, what=''):
         value = value.strip()
-        return value # TODO
+        if str in types and value.startswith('"') and value.endswith('"'):
+            return value[1:-1]
+        if bool in types:
+            if value == 'false':
+                return False
+            if value == 'true':
+                return True
+        for Class in (int, float, Base64Data, DataType, Name, Reference):
+            if Class in types:
+                try:
+                    return Class(value)
+                except (ValueError, Error):
+                    pass # may be another type
+        what = f' {what}' if what else ''
+        self.error(f'invalid{what} value: {value!r}')
 
 
     def expect(self, what):
@@ -276,7 +343,7 @@ class _Parser:
 
     def skip_ws_and_comments(self):
         text = self.text[self.pos:]
-        match = _WS_RX.match(text)
+        match = WS_RX.match(text)
         if match is not None:
             ws = match[0]
             self.lino += ws.count('\n')
@@ -326,14 +393,19 @@ class Error(Exception):
     pass
 
 
-_RESERVED_STRUCTURE_ID_RX = re.compile(r'[a-z]\d*')
-_DATA_TYPE_RX = re.compile( # Must be ordered longest to shortest
+RESERVED_STRUCTURE_ID_RX = re.compile(r'[a-z]\d*')
+DATA_TYPE_RX = re.compile( # NOTE Must be ordered longest to shortest
     r'(:?float16|float32|float64|base64|uint16|uint32|uint64|string|double|'
     r'float|int16|int32|int64|uint8|int8|bool|half|type|f16|u32|u64|f32|'
     r'f64|i16|i32|i64|u16|ref|i8|u8|b|d|f|h|r|s|t|z)')
-_ID_RX = re.compile(r'[A-Za-z_][0-9A-Za-z_]*')
-_NAME_RX = re.compile(r'[%$][A-Za-z_][0-9A-Za-z_]*')
-_WS_RX = re.compile(r'[\s\n]+', re.DOTALL | re.MULTILINE)
+ID_RX = re.compile(r'[A-Za-z_][0-9A-Za-z_]*')
+NAME_RX = re.compile(r'[%$][A-Za-z_][0-9A-Za-z_]*')
+REFERENCE_RX = re.compile(
+    r'null|[%$][A-Za-z_][0-9A-Za-z_]*(?:%[A-Za-z_][0-9A-Za-z_]*)*')
+WS_RX = re.compile(r'[\s\n]+', re.DOTALL | re.MULTILINE)
+BASE64_DATA_RX = re.compile(
+    r'[A-Za-z0-9][A-Za-z0-9][+/\s\nA-Za-z0-9]*={0,2}',
+    re.DOTALL | re.MULTILINE)
 
 
 if __name__ == '__main__':
