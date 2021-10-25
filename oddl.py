@@ -517,11 +517,11 @@ WS_RX = re.compile(r'[\s\n]+', re.DOTALL | re.MULTILINE)
 HEX_PATTERN = '[A-Fa-z\\d]'
 NUMBER_RX = re.compile( # does _not_ handle char-literal's
     r'[-+]?(?:' # order: letters first then longest to shortest
-    r'0[bB][01][_01]*|' # binary-literal
-    r'0[oO][0-7][_0-7]*|' # octal-literal
-    r'0[xX][A-Fa-f\d][_A-Fa-f\d]*|' # hex-literal
-    r'(?:\d[_\d]*(?:\.\d[_\d]*)?|\.\d[_\d]*)' # float-literal
-    r'(?:(?:[eE][-+]?\d)?[_\d]*)?|' # optional exponent
+    r'0[bB][01](?:_?[01])*|' # binary-literal
+    r'0[oO][0-7](?:_?[0-7])*|' # octal-literal
+    r'0[xX][A-Fa-f\d](?:_?[A-Fa-f\d])*|' # hex-literal
+    r'(?:\d(?:_?\d)*(?:\.\d(?:_?\d)*)?|\.\d(?:_?\d)*)' # float-literal
+    r'(?:(?:[eE][-+]?\d)?(:?_?\d)*)?|' # optional exponent
     r'\d(?:_?\d)*' # decimal-literal
     r')')
 
