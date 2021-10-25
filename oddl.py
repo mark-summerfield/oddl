@@ -512,7 +512,7 @@ RESERVED_STRUCTURE_ID_RX = re.compile(r'[a-z]\d*')
 ID_RX = re.compile(r'[A-Za-z_][0-9A-Za-z_]*')
 NAME_RX = re.compile(r'[%$][A-Za-z_][0-9A-Za-z_]*')
 WS_RX = re.compile(r'[\s\n]+', re.DOTALL | re.MULTILINE)
-HEX_PATTERN = '[A-Fa-z\d]'
+HEX_PATTERN = '[A-Fa-z\\d]'
 NUMBER_RX = re.compile( # does _not_ handle char-literal's
     r'[-+]?(?:' # order: most restricted to least restricted
     r'0[bB][01](?:_[01])*|' # binary-literal
