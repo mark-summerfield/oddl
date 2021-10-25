@@ -74,9 +74,14 @@ class Oddl:
 
 class Base64Data(bytes):
 
+    REGEX = re.compile(
+        r'[A-Za-z0-9][A-Za-z0-9][+/\s\nA-Za-z0-9]*={0,2}',
+        re.DOTALL | re.MULTILINE)
+
+
     def __new__(Class, value):
         message = ''
-        match = BASE64_DATA_RX.fullmatch(value)
+        match = Class.REGEX.fullmatch(value)
         if match is not None:
             try:
                 return super().__new__(Class, base64.b64decode(
@@ -88,26 +93,25 @@ class Base64Data(bytes):
 
 class DataType(str):
 
+    REGEX = re.compile( # NOTE Must be ordered longest to shortest
+        r'(:?float16|float32|float64|base64|uint16|uint32|uint64|string|'
+        r'double|float|int16|int32|int64|uint8|int8|bool|half|type|f16|'
+        r'u32|u64|f32|f64|i16|i32|i64|u16|ref|i8|u8|b|d|f|h|r|s|t|z)')
+
     def __new__(Class, value):
-        match = DATA_TYPE_RX.fullmatch(value)
+        match = Class.REGEX.fullmatch(value)
         if match is not None:
             return super().__new__(Class, match[0])
         raise Error(f'invalid data-type: {value!r}')
 
 
-class Name(str):
-
-    def __new__(Class, value):
-        match = NAME_RX.fullmatch(value)
-        if match is not None:
-            return super().__new__(Class, match[0])
-        raise Error(f'invalid name: {value!r}')
-
-
 class Reference(str):
 
+    REGEX = re.compile(
+        r'null|[%$][A-Za-z_][0-9A-Za-z_]*(?:%[A-Za-z_][0-9A-Za-z_]*)*')
+
     def __new__(Class, value):
-        match = REFERENCE_RX.fullmatch(value)
+        match = Class.REGEX.fullmatch(value)
         if match is not None:
             return super().__new__(Class, match[0])
         raise Error(f'invalid reference: {value!r}')
@@ -120,13 +124,13 @@ class Reference(str):
 
 class Structure:
 
-    def __init__(self, typename):
-        self.typename = typename # built-in or user-defined identifier
+    def __init__(self, datatype):
+        self.datatype = datatype # built-in or user-defined identifier
         self.name = None
 
 
     def __repr__(self): # TODO this is used for debugging right now
-        return (f'{self.__class__.__name__}({self.typename}) '
+        return (f'{self.__class__.__name__}({self.datatype}) '
                 f'name={self.name}')
 
 
@@ -136,8 +140,8 @@ class PrimitiveStructure(Structure):
 
 class DerivedStructure(Structure):
 
-    def __init__(self, typename):
-        super().__init__(typename)
+    def __init__(self, datatype):
+        super().__init__(datatype)
         self.structures = []
         self.properties = {}
 
@@ -189,12 +193,10 @@ class Parser:
         text = self.advance(optional, 'structure expected')
         if not text:
             return
-        match = DATA_TYPE_RX.match(text)
-        if match is not None:
-            typename = match[0]
-            self.pos += len(typename)
+        value = self.parse_value(DataType)
+        if value is not None:
             # Append to current structure's list of structures
-            self.current.structures.append(PrimitiveStructure(typename))
+            self.current.structures.append(PrimitiveStructure(value))
             self.parse_primitive_structure_content()
         else:
             match = RESERVED_STRUCTURE_ID_RX.match(text)
@@ -202,12 +204,12 @@ class Parser:
                 self.error(f'illegal structure name {match[0]}')
             match = ID_RX.match(text)
             if match is not None:
-                typename = match[0]
-                self.pos += len(typename)
+                datatype = match[0]
+                self.pos += len(datatype)
                 # Append to current structure's list of structures and make
                 # this structure the new current structure when parsing its
                 # content since DerivedStructures can nest
-                structure = DerivedStructure(typename)
+                structure = DerivedStructure(datatype)
                 self.current.structures.append(structure)
                 self.stack.append(structure)
                 self.parse_derived_structure_content()
@@ -283,45 +285,133 @@ class Parser:
         if text[0] == '(':
             self.pos += 1
             text = text[1:]
-            i = text.find(')', 1)
-            if i == -1:
-                self.error('property list missing closing \')\'')
-            for prop in (p.strip() for p in text[:i].split(',')):
-                prop = prop.split('=', 1)
-                name = prop[0].strip()
-                value = (self.parse_property_value(prop[1])
-                         if len(prop) == 2 else True)
-                self.current.properties[name] = value
-            self.pos += i
-            self.expect(')')
+            count = 0
+            while True:
+                if not self.parse_property():
+                    if count == 0:
+                        self.error('at least one property expected')
+                    break
+                count += 1
         elif not optional:
             self.error('expected \'(\' to begin property list')
 
 
-    def parse_property_value(self, value):
+    def parse_property(self):
+        text = self.advance(False, 'property expected')
+        if text.startswith(')'):
+            self.pos += 1
+            return False # no more
+        match = ID_RX.match(text)
+        if match is None:
+            self.error('property expected')
+        name = match[0]
+        self.pos += len(name)
+        text = text[len(name):]
+        self.current.properties[name] = True # assume bool
+        while text:
+            c = text[0]
+            self.pos += 1
+            text = text[1:]
+            if c.isspace():
+                continue
+            elif c == ')':
+                return False # no more
+            elif c == ',':
+                break # just had a bool property; another to follow
+            elif c == '=':
+                text = self.advance(False,
+                                    'property value expected')
+                self.parse_property_value(name)
+                break
+            else:
+                self.error('property value expected')
+        return True # maybe more
+
+
+    def parse_property_value(self, name):
         # (bool-literal | integer-literal | float-literal | string-literal |
         # reference | data-type | base64-data)
-        return self.parse_value(value, {bool, int, float, str, Reference,
-                                        DataType, Base64Data}, 'property')
+        text = self.text[self.pos:]
+        original = text[:20]
+        value = None
+        if text.startswith('"'):
+            value = self.parse_string()
+        elif text.startswith(('$', '%')):
+            value = self.parse_value(Reference)
+            if value is None:
+                self.error('invalid reference')
+        elif text.startswith('false'):
+            value = False
+            self.pos += len('false')
+        elif text.startswith('true'):
+            value = True
+            self.pos += len('true')
+        else:
+            value = self.parse_value(DataType)
+            if value is None:
+                value = self.parse_value(Base64Data)
+                if value is None:
+                    try:
+                        value = int(value)
+                    except ValueError:
+                        try:
+                            value = float(value)
+                        except ValueError:
+                            value = None
+        if value is None:
+            self.error(f'invalid property {name} value: {original!r}...')
+        self.current.properties[name] = value
 
 
-    def parse_value(self, value, types, what=''):
-        value = value.strip()
-        if str in types and value.startswith('"') and value.endswith('"'):
-            return value[1:-1]
-        if bool in types:
-            if value == 'false':
-                return False
-            if value == 'true':
-                return True
-        for Class in (int, float, Base64Data, DataType, Name, Reference):
-            if Class in types:
-                try:
-                    return Class(value)
-                except (ValueError, Error):
-                    pass # may be another type
-        what = f' {what}' if what else ''
-        self.error(f'invalid{what} value: {value!r}')
+    def parse_string(self):
+        assert self.text[self.pos] == '"', 'expected \'"\' to start string'
+        chars = []
+        prev = ''
+        self.pos += 1 # skip opening "
+        text = self.text[self.pos:]
+        while text:
+            c = text[0]
+            self.pos += 1
+            text = text[1:]
+            if c == '"':
+                if prev == '\\':
+                    prev = ''
+                else: # end of string
+                    return ''.join(chars)
+            elif c == '\\':
+                if prev == '\\':
+                    prev = ''
+                else:
+                    prev = c
+                    continue
+            elif prev == '\\':
+                prev = ''
+                if c in '\'?abfnrtv':
+                    c = {"'": "'", '?': '?', 'a': '\a', 'b': '\b',
+                         'f': '\f', 'n': '\n', 'r': '\r', 't': '\t',
+                         'v': '\v'}[c]
+                elif c == 'x':
+                    match = HEX2_RX.match(text)
+                    if match is not None:
+                        h = match[0]
+                        self.pos += len(h)
+                        text = text[len(h):]
+                        c = chr(int(h, 16))
+                    else:
+                        self.error(
+                            f'expected two hex digits not {text[:2]!r}')
+                else:
+                    self.warning(f'needlessly escaped \'{c}\'')
+            chars.append(c)
+        self.error('expected \'"\' at end of string')
+
+
+    def parse_value(self, Class):
+        match = Class.REGEX.match(self.text[self.pos:])
+        if match is not None:
+            value = match[0]
+            self.pos += len(value)
+            return Class(value)
 
 
     def expect(self, what):
@@ -394,18 +484,10 @@ class Error(Exception):
 
 
 RESERVED_STRUCTURE_ID_RX = re.compile(r'[a-z]\d*')
-DATA_TYPE_RX = re.compile( # NOTE Must be ordered longest to shortest
-    r'(:?float16|float32|float64|base64|uint16|uint32|uint64|string|double|'
-    r'float|int16|int32|int64|uint8|int8|bool|half|type|f16|u32|u64|f32|'
-    r'f64|i16|i32|i64|u16|ref|i8|u8|b|d|f|h|r|s|t|z)')
 ID_RX = re.compile(r'[A-Za-z_][0-9A-Za-z_]*')
 NAME_RX = re.compile(r'[%$][A-Za-z_][0-9A-Za-z_]*')
-REFERENCE_RX = re.compile(
-    r'null|[%$][A-Za-z_][0-9A-Za-z_]*(?:%[A-Za-z_][0-9A-Za-z_]*)*')
 WS_RX = re.compile(r'[\s\n]+', re.DOTALL | re.MULTILINE)
-BASE64_DATA_RX = re.compile(
-    r'[A-Za-z0-9][A-Za-z0-9][+/\s\nA-Za-z0-9]*={0,2}',
-    re.DOTALL | re.MULTILINE)
+HEX2_RX = re.compile(r'[0-9A-Fa-f]{2}')
 
 
 if __name__ == '__main__':
