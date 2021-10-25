@@ -78,7 +78,6 @@ class Base64Data(bytes):
         r'[A-Za-z0-9][A-Za-z0-9][+/\s\nA-Za-z0-9]*={0,2}',
         re.DOTALL | re.MULTILINE)
 
-
     def __new__(Class, value):
         message = ''
         match = Class.REGEX.fullmatch(value)
@@ -218,6 +217,7 @@ class Parser:
                 self.error('primitive or derived structure expected')
 
 
+    # TODO #######################
     def parse_primitive_structure_content(self, *, optional=False):
         # "[" integer-literal "]" "*"? name? "{" data-array-list? "}"
         # |
@@ -425,12 +425,11 @@ class Parser:
         if j == -1:
             self.error('expected closing "\'" for char-literal')
         c = text[1:j] # ignore enclosing 's
-        self.pos = j + 1 # skip past closing '
+        self.pos += j + 1 # skip past closing '
         if len(c) == 4 and c.startswith('\\x'):
-            c = c[2:]
-            match = re.match(HEX_PATTERN + '{2}')
+            match = re.match(HEX_PATTERN + '{2}', c[2:])
             if match is not None:
-                return int(c, 16)
+                return int(match[0], 16)
             self.error(f'invalid hex char: {c!r}')
         if len(c) == 2 and c[0] == '\\':
             c = CHAR_FOR_LITERAL.get(c[1], c[1])
