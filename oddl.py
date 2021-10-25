@@ -415,8 +415,11 @@ class Parser:
         if match is not None:
             value = match[0]
             self.pos += len(value)
-            Class = float if '.' in value else int
-            return Class(value)
+            if len(value) > 2 and value[1] in 'bBoOxX':
+                kind = value[1]
+                radix = 2 if kind in 'bB' else (8 if kind in 'oO' else 16)
+                return int(value[2:], radix)
+            return float(value) if '.' in value else int(value)
 
 
     def parse_char_literal_as_number(self, text):
@@ -513,13 +516,13 @@ NAME_RX = re.compile(r'[%$][A-Za-z_][0-9A-Za-z_]*')
 WS_RX = re.compile(r'[\s\n]+', re.DOTALL | re.MULTILINE)
 HEX_PATTERN = '[A-Fa-z\\d]'
 NUMBER_RX = re.compile( # does _not_ handle char-literal's
-    r'[-+]?(?:' # order: longest to shortest
-    r'(?:\d(?:_\d)*(?:\.\d(?:_\d)*)?|\.\d(?:_\d)*)' # float-literal
-    r'(?:(?:[eE][-+]?\d)?(?:_\d)*)?|' # optional exponent
-    r'\d(?:_?\d)*|' # decimal-literal
-    r'0[bB][01](?:_[01])*|' # binary-literal
-    r'0[oO][0-7](?:_[0-7])*|' # octal-literal
-    r'0[xX][A-Fa-f\d](?:_[A-Fa-f\d])*' # hex-literal
+    r'[-+]?(?:' # order: letters first then longest to shortest
+    r'0[bB][01][_01]*|' # binary-literal
+    r'0[oO][0-7][_0-7]*|' # octal-literal
+    r'0[xX][A-Fa-f\d][_A-Fa-f\d]*|' # hex-literal
+    r'(?:\d[_\d]*(?:\.\d[_\d]*)?|\.\d[_\d]*)' # float-literal
+    r'(?:(?:[eE][-+]?\d)?[_\d]*)?|' # optional exponent
+    r'\d(?:_?\d)*' # decimal-literal
     r')')
 
 CHAR_FOR_LITERAL = {"'": "'", '?': '?', 'a': '\a', 'b': '\b', 'f': '\f',
