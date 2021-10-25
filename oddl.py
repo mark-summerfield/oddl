@@ -351,13 +351,7 @@ class Parser:
             if value is None:
                 value = self.parse_value(Base64Data)
                 if value is None:
-                    try:
-                        value = int(value)
-                    except ValueError:
-                        try:
-                            value = float(value)
-                        except ValueError:
-                            value = None
+                    value = self.parse_number()
         if value is None:
             self.error(f'invalid property {name} value: {original!r}...')
         self.current.properties[name] = value
@@ -387,11 +381,10 @@ class Parser:
             elif prev == '\\':
                 prev = ''
                 if c in '\'?abfnrtv':
-                    c = {"'": "'", '?': '?', 'a': '\a', 'b': '\b',
-                         'f': '\f', 'n': '\n', 'r': '\r', 't': '\t',
-                         'v': '\v'}[c]
-                elif c == 'x':
-                    match = HEX2_RX.match(text)
+                    c = CHAR_FOR_LITERAL[c]
+                elif c in 'xuU':
+                    n = '2' if c == 'x' else ('4' if c == 'u' else '6')
+                    match = re.match(HEX_PATTERN + '{' + n + '}')
                     if match is not None:
                         h = match[0]
                         self.pos += len(h)
@@ -399,7 +392,7 @@ class Parser:
                         c = chr(int(h, 16))
                     else:
                         self.error(
-                            f'expected two hex digits not {text[:2]!r}')
+                            f'expected {n} hex digits not {text[:n]!r}')
                 else:
                     self.warning(f'needlessly escaped \'{c}\'')
             chars.append(c)
@@ -412,6 +405,38 @@ class Parser:
             value = match[0]
             self.pos += len(value)
             return Class(value)
+
+
+    def parse_number(self):
+        text = self.text[self.pos:]
+        if text.startswith("'"): # char-literal
+            return self.parse_char_literal_as_number(text)
+        match = NUMBER_RX.match(self.text[self.pos:])
+        if match is not None:
+            value = match[0]
+            self.pos += len(value)
+            Class = float if '.' in value else int
+            return Class(value)
+
+
+    def parse_char_literal_as_number(self, text):
+        assert text.startswith("'"), 'expected char-literal'
+        j = text.find("'", 1)
+        if j == -1:
+            self.error('expected closing "\'" for char-literal')
+        c = text[1:j] # ignore enclosing 's
+        self.pos = j + 1 # skip past closing '
+        if len(c) == 4 and c.startswith('\\x'):
+            c = c[2:]
+            match = re.match(HEX_PATTERN + '{2}')
+            if match is not None:
+                return int(c, 16)
+            self.error(f'invalid hex char: {c!r}')
+        if len(c) == 2 and c[0] == '\\':
+            c = CHAR_FOR_LITERAL.get(c[1], c[1])
+        if c is not None and len(c) == 1:
+            return ord(c)
+        self.error('invalid char-literal')
 
 
     def expect(self, what):
@@ -487,7 +512,19 @@ RESERVED_STRUCTURE_ID_RX = re.compile(r'[a-z]\d*')
 ID_RX = re.compile(r'[A-Za-z_][0-9A-Za-z_]*')
 NAME_RX = re.compile(r'[%$][A-Za-z_][0-9A-Za-z_]*')
 WS_RX = re.compile(r'[\s\n]+', re.DOTALL | re.MULTILINE)
-HEX2_RX = re.compile(r'[0-9A-Fa-f]{2}')
+HEX_PATTERN = '[A-Fa-z\d]'
+NUMBER_RX = re.compile( # does _not_ handle char-literal's
+    r'[-+]?(?:' # order: most restricted to least restricted
+    r'0[bB][01](?:_[01])*|' # binary-literal
+    r'0[oO][0-7](?:_[0-7])*|' # octal-literal
+    r'\d(?:_?\d)*|' # decimal-literal
+    r'0[xX][A-Fa-f\d](?:_[A-Fa-f\d])*|' # hex-literal / float-literal
+    r'(?:\d(?:_\d)*(?:\.\d(?:_\d)*)?|\.\d(?:_\d)*)(?:[eE][-+]?\d)?(?:_\d)*'
+    r')'
+    )
+
+CHAR_FOR_LITERAL = {"'": "'", '?': '?', 'a': '\a', 'b': '\b', 'f': '\f',
+                    'n': '\n', 'r': '\r', 't': '\t', 'v': '\v'}
 
 
 if __name__ == '__main__':
