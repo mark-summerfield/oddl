@@ -36,26 +36,26 @@ class Oddl:
         parser.parse(text)
 
 
-    def save(self, filename=None):
+    def save(self, filename=None, *, minimize=False):
         filename = filename or self.filename
         with open(filename, 'wt', encoding='utf-8') as file:
-            self.write(file)
+            self.write(file, minimize=minimize)
 
 
     dump = save
 
 
-    def dumps(self):
+    def dumps(self, *, minimize=False):
         out = io.StringIO()
         try:
-            self.write(out)
+            self.write(out, minimize=minimize)
             return out.getvalue()
         finally:
             out.close()
 
 
-    def write(self, out):
-        pass # TODO
+    def write(self, out, *, minimize):
+        pass # TODO if minimize is True then minimize else pretty
 
 
     def __repr__(self): # TODO this is used for debugging right now
@@ -484,11 +484,14 @@ class Parser:
 
     def error(self, message):
         print(self.oddl) # TODO delete
-        raise Error(f'error [{self.lino}.{self.column}]: {message!r}')
+        file = f' {self.oddl.filename!r}' if self.oddl.filename else ''
+        raise Error(
+            f'ERROR:{file} [{self.lino}.{self.column}]: {message!r}')
 
 
     def warning(self, message):
-        print(f'warning [{self.lino}.{self.column}]: {message!r}',
+        file = f' {self.oddl.filename!r}' if self.oddl.filename else ''
+        print(f'Warning:{file} [{self.lino}.{self.column}]: {message!r}',
               file=sys.stderr)
 
 
@@ -531,7 +534,6 @@ CHAR_FOR_LITERAL = {"'": "'", '?': '?', 'a': '\a', 'b': '\b', 'f': '\f',
 
 if __name__ == '__main__':
     import pathlib
-
     if len(sys.argv) == 1 or sys.argv[1] in {'h', 'help', '-h', '--help'}:
         raise SystemExit(f'''\
 usage: {pathlib.Path(sys.argv[0]).name} \
@@ -541,13 +543,37 @@ usage: {pathlib.Path(sys.argv[0]).name} \
 h help         : show this usage and quit.
 l lint c check : check each .oddl file and report any problems (this is the
                  default action).
+m minimize     : resave each .oddl file will all needless whitespace
+                 (including newlines) removed.
+p pretty       : resave each .oddl file with indentation and newlines
+                 inserted/replaced to produce a regularized human-readable
+                 file.
+
+Both minimize and pretty remove all comments.
 
 Letter options may be prefixed by - and word options by -- e.g., -l or \
---lint
+--minimize.
 ''')
     args = sys.argv[1:]
-    if args[0] in {'l', 'lint', '-l', '--lint', 'c', 'check', '-c',
-                   '--check'}:
+    arg = args[0]
+    action = None
+    if arg in {'l', 'lint', '-l', '--lint', 'c', 'check', '-c', '--check'}:
+        action = 'lint'
+    elif arg in {'m', 'minimize', '-m', '--minimize'}:
+        action = 'minimize'
+    elif arg in {'p', 'pretty', '-p', '--pretty'}:
+        action = 'pretty'
+    if action is None:
+        action = 'lint'
+    else:
         args = args[1:]
     for filename in args:
-        Oddl(filename).check()
+        print('\n' + f' {filename} '.center(72, '@'))
+        try:
+            oddl = Oddl(filename)
+            if action == 'lint':
+                oddl.check()
+            else:
+                oddl.save(minimize=action == 'minimize')
+        except Error as err:
+            print(err)
