@@ -68,6 +68,8 @@ class Oddl:
 
 class Base64Data(bytes):
 
+    __slots__ = ()
+
     REGEX = re.compile(
         r'[A-Za-z0-9][A-Za-z0-9][+/\s\nA-Za-z0-9]*={0,2}',
         re.DOTALL | re.MULTILINE)
@@ -85,10 +87,12 @@ class Base64Data(bytes):
 
 
     def write(self, out):
-        out.write(base64.b64encode(self))
+        out.write(base64.b64encode(self).decode('ascii'))
 
 
 class DataType(str):
+
+    __slots__ = ()
 
     REGEX = re.compile( # NOTE Must be ordered longest to shortest
         r'(:?float16|float32|float64|base64|uint16|uint32|uint64|string|'
@@ -124,10 +128,12 @@ class DataType(str):
 
 
     def write(self, out):
-        out.write(f'{self:g}')
+        out.write(self)
 
 
 class Reference(str):
+
+    __slots__ = ()
 
     REGEX = re.compile(
         r'null|[%$][A-Za-z_][0-9A-Za-z_]*(?:%[A-Za-z_][0-9A-Za-z_]*)*')
@@ -148,11 +154,37 @@ class Reference(str):
         out.write(self)
 
 
-class Structure:
+class Int(int):
+
+    __slots__ = ()
+
+    def write(self, out):
+        out.write(str(self))
+
+
+class Real(float):
+
+    __slots__ = ()
+
+    def write(self, out):
+        out.write(f'{self:g}')
+
+
+class String(str):
+
+    __slots__ = ()
 
     ESC_FOR_CHAR = {'"': '\\"', '\\': '\\\\', '\a': '\\a', '\b': '\\b',
                     '\f': '\\f', '\n': '\\n', '\r': '\\r', '\t': '\\t',
                     '\v': '\\v'}
+
+    def write(self, out):
+        out.write('"')
+        out.write(''.join(self.ESC_FOR_CHAR.get(c, c) for c in self))
+        out.write('"')
+
+
+class Structure:
 
     def __init__(self, datatype):
         self.datatype = datatype # built-in or user-defined identifier
@@ -161,25 +193,6 @@ class Structure:
 
     def write(self, _out, _indent):
         raise NotImplementedError
-
-
-    def write_value(self, out, value):
-        if value is True:
-            out.write('true')
-        elif value is False:
-            out.write('false')
-        elif isinstance(value, (Base64Data, DataType, Reference)):
-            value.write(out)
-        elif isinstance(value, float):
-            out.write(f'{value:g}')
-        elif isinstance(value, int):
-            out.write(str(value))
-        elif isinstance(value, str):
-            out.write('"')
-            out.write(''.join(self.ESC_FOR_CHAR.get(c, c) for c in value))
-            out.write('"')
-        else:
-            self.error(f'unhandled value type: {value}:{type(value)}')
 
 
 class PrimitiveStructure(Structure):
@@ -219,7 +232,12 @@ class DerivedStructure(Structure):
             sep = ''
             for name, value in self.properties.items():
                 out.write(f'{sep}{name} = ')
-                self.write_value(out, value)
+                if value is True:
+                    out.write('true')
+                elif value is False:
+                    out.write('false')
+                else:
+                    value.write(out)
                 sep = ', '
             out.write(')')
 
@@ -442,7 +460,7 @@ class Parser:
                 if prev == '\\':
                     prev = ''
                 else: # end of string
-                    return ''.join(chars)
+                    return String(''.join(chars))
             elif c == '\\':
                 if prev == '\\':
                     prev = ''
@@ -490,7 +508,7 @@ class Parser:
                 kind = value[1]
                 radix = 2 if kind in 'bB' else (8 if kind in 'oO' else 16)
                 return int(value[2:], radix)
-            return float(value) if '.' in value else int(value)
+            return Real(value) if '.' in value else Int(value)
 
 
     def parse_char_literal_as_number(self, text):
@@ -508,7 +526,7 @@ class Parser:
         if len(c) == 2 and c[0] == '\\':
             c = CHAR_FOR_LITERAL.get(c[1], c[1])
         if c is not None and len(c) == 1:
-            return ord(c)
+            return Int(ord(c))
         self.error('invalid char-literal')
 
 
