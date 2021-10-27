@@ -174,14 +174,12 @@ class String(str):
 
     __slots__ = ()
 
-    ESC_FOR_CHAR = {'"': '\\"', '\\': '\\\\', '\a': '\\a', '\b': '\\b',
-                    '\f': '\\f', '\n': '\\n', '\r': '\\r', '\t': '\\t',
-                    '\v': '\\v'}
+    TRANS_TABLE = str.maketrans({'"': '\\"', '\\': '\\\\', '\a': '\\a',
+                                 '\b': '\\b', '\f': '\\f', '\n': '\\n',
+                                 '\r': '\\r', '\t': '\\t', '\v': '\\v'})
 
     def write(self, out):
-        out.write('"')
-        out.write(''.join(self.ESC_FOR_CHAR.get(c, c) for c in self))
-        out.write('"')
+        out.write(f'"{self.translate(self.TRANS_TABLE)}"')
 
 
 class Structure:
