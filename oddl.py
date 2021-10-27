@@ -36,33 +36,27 @@ class Oddl:
         parser.parse(text)
 
 
-    def save(self, filename=None, *, minimize=False):
+    def save(self, filename=None):
         filename = filename or self.filename
         with open(filename, 'wt', encoding='utf-8') as file:
-            self.write(file, minimize=minimize)
+            self.write(file)
 
 
     dump = save
 
 
-    def dumps(self, *, minimize=False):
+    def dumps(self):
         out = io.StringIO()
         try:
-            self.write(out, minimize=minimize)
+            self.write(out)
             return out.getvalue()
         finally:
             out.close()
 
 
-    def write(self, out, *, minimize):
-        pass # TODO if minimize is True then minimize else pretty
-
-
-    def __repr__(self): # TODO this is used for debugging right now
-        parts = []
-        for i, structure in enumerate(self.structures):
-            parts.append(f'#{i}: {structure}')
-        return '\n'.join(parts)
+    def write(self, out):
+        for structure in self.structures:
+            structure.write(out, '')
 
 
     def check(self):
@@ -90,6 +84,10 @@ class Base64Data(bytes):
         raise Error(f'invalid base-64-data{message}: {value!r}')
 
 
+    def write(self, out):
+        out.write(base64.b64encode(self))
+
+
 class DataType(str):
 
     REGEX = re.compile( # NOTE Must be ordered longest to shortest
@@ -97,11 +95,36 @@ class DataType(str):
         r'double|float|int16|int32|int64|uint8|int8|bool|half|type|f16|'
         r'u32|u64|f32|f64|i16|i32|i64|u16|ref|i8|u8|b|d|f|h|r|s|t|z)')
 
+    NAME_FOR_NAME = { # prefer shortest, but for float prefer most sensible
+        'base64': 'z',
+        'bool': 'b',
+        'double': 'f64',
+        'float': 'f32',
+        'float16': 'f16',
+        'float32': 'f32',
+        'float64': 'f64',
+        'half': 'f16',
+        'int16': 'i16',
+        'int32': 'i32',
+        'int64': 'i64',
+        'int8': 'i8',
+        'ref': 'r',
+        'string': 's',
+        'type': 't',
+        'uint16': 'u16',
+        'uint32': 'u32',
+        'uint64': 'u64',
+        'uint8': 'u8'}
+
     def __new__(Class, value):
         match = Class.REGEX.fullmatch(value)
         if match is not None:
-            return super().__new__(Class, match[0])
+            return super().__new__(Class, Class.NAME_FOR_NAME[match[0]])
         raise Error(f'invalid data-type: {value!r}')
+
+
+    def write(self, out):
+        out.write(f'{self:g}')
 
 
 class Reference(str):
@@ -121,20 +144,52 @@ class Reference(str):
         return self == 'null'
 
 
+    def write(self, out):
+        out.write(self)
+
+
 class Structure:
+
+    ESC_FOR_CHAR = {'"': '\\"', '\\': '\\\\', '\a': '\\a', '\b': '\\b',
+                    '\f': '\\f', '\n': '\\n', '\r': '\\r', '\t': '\\t',
+                    '\v': '\\v'}
 
     def __init__(self, datatype):
         self.datatype = datatype # built-in or user-defined identifier
         self.name = None
 
 
-    def __repr__(self): # TODO this is used for debugging right now
-        return (f'{self.__class__.__name__}({self.datatype}) '
-                f'name={self.name}')
+    def write(self, _out, _indent):
+        raise NotImplementedError
+
+
+    def write_value(self, out, value):
+        if value is True:
+            out.write('true')
+        elif value is False:
+            out.write('false')
+        elif isinstance(value, (Base64Data, DataType, Reference)):
+            value.write(out)
+        elif isinstance(value, float):
+            out.write(f'{value:g}')
+        elif isinstance(value, int):
+            out.write(str(value))
+        elif isinstance(value, str):
+            out.write('"')
+            out.write(''.join(self.ESC_FOR_CHAR.get(c, c) for c in value))
+            out.write('"')
+        else:
+            self.error(f'unhandled value type: {value}:{type(value)}')
 
 
 class PrimitiveStructure(Structure):
-    pass
+
+    def write(self, out, indent):
+        out.write(f'{indent}{self.datatype}')
+        if self.name is not None:
+            out.write(f' {self.name}')
+        out.write('\n')
+        # TODO
 
 
 class DerivedStructure(Structure):
@@ -145,12 +200,28 @@ class DerivedStructure(Structure):
         self.properties = {}
 
 
-    def __repr__(self): # TODO this is used for debugging right now
-        parts = [super().__repr__(), 'structures=[']
-        for structure in self.structures:
-            parts.append(repr(structure))
-        parts += [']', f'properties={self.properties}']
-        return '\n'.join(parts)
+    def write(self, out, indent):
+        out.write(f'{indent}{self.datatype}')
+        if self.name is not None:
+            out.write(f' {self.name}')
+        self.write_properties(out)
+        out.write('\n')
+        if self.structures:
+            out.write(f'{indent}{{\n')
+            for structure in self.structures:
+                structure.write(out, indent + TAB)
+            out.write(f'{indent}}}\n')
+
+
+    def write_properties(self, out):
+        if self.properties:
+            out.write(' (')
+            sep = ''
+            for name, value in self.properties.items():
+                out.write(f'{sep}{name} = ')
+                self.write_value(out, value)
+                sep = ', '
+            out.write(')')
 
 
 class Parser:
@@ -483,7 +554,7 @@ class Parser:
 
 
     def error(self, message):
-        print(self.oddl) # TODO delete
+        self.oddl.write(sys.stdout) # TODO delete
         file = f' {self.oddl.filename!r}' if self.oddl.filename else ''
         raise Error(
             f'ERROR:{file} [{self.lino}.{self.column}]: {message!r}')
@@ -513,23 +584,23 @@ class Error(Exception):
     pass
 
 
-RESERVED_STRUCTURE_ID_RX = re.compile(r'[a-z]\d*')
+RESERVED_STRUCTURE_ID_RX = re.compile(r'[a-z][0-9]*')
 ID_RX = re.compile(r'[A-Za-z_][0-9A-Za-z_]*')
 NAME_RX = re.compile(r'[%$][A-Za-z_][0-9A-Za-z_]*')
 WS_RX = re.compile(r'[\s\n]+', re.DOTALL | re.MULTILINE)
-HEX_PATTERN = '[A-Fa-z\\d]'
+HEX_PATTERN = '[A-Fa-z[0-9]]'
 NUMBER_RX = re.compile( # does _not_ handle char-literal's
     r'[-+]?(?:' # order: letters first then longest to shortest
     r'0[bB][01](?:_?[01])*|' # binary-literal
     r'0[oO][0-7](?:_?[0-7])*|' # octal-literal
-    r'0[xX][A-Fa-f\d](?:_?[A-Fa-f\d])*|' # hex-literal
-    r'(?:\d(?:_?\d)*(?:\.\d(?:_?\d)*)?|\.\d(?:_?\d)*)' # float-literal
-    r'(?:(?:[eE][-+]?\d)?(:?_?\d)*)?|' # optional exponent
-    r'\d(?:_?\d)*' # decimal-literal
-    r')')
-
+    r'0[xX][A-Fa-f0-9](?:_?[A-Fa-f0-9])*|' # hex-literal / float-literal
+    r'(?:[0-9](?:_?[0-9])*(?:\.[0-9](?:_?[0-9])*)?|\.[0-9](?:_?[0-9])*)'
+    r'(?:(?:[eE][-+]?[0-9])?(:?_?[0-9])*)?|' # optional exponent
+    r'[0-9](?:_?[0-9])*' # decimal-literal
+    r')') # must use [0-9] rather than \d because \d is broader
 CHAR_FOR_LITERAL = {"'": "'", '?': '?', 'a': '\a', 'b': '\b', 'f': '\f',
                     'n': '\n', 'r': '\r', 't': '\t', 'v': '\v'}
+TAB = '    '
 
 
 if __name__ == '__main__':
@@ -543,26 +614,20 @@ usage: {pathlib.Path(sys.argv[0]).name} \
 h help         : show this usage and quit.
 l lint c check : check each .oddl file and report any problems (this is the
                  default action).
-m minimize     : resave each .oddl file will all needless whitespace
-                 (including newlines) removed.
-p pretty       : resave each .oddl file with indentation and newlines
-                 inserted/replaced to produce a regularized human-readable
-                 file.
-
-Both minimize and pretty remove all comments.
+f format       : resave each .oddl file reformatted with indentation and
+                 newlines to produce a regularized human-readable file (with
+                 comments stripped and all numbers in base 10).
 
 Letter options may be prefixed by - and word options by -- e.g., -l or \
---minimize.
+--format.
 ''')
     args = sys.argv[1:]
     arg = args[0]
     action = None
     if arg in {'l', 'lint', '-l', '--lint', 'c', 'check', '-c', '--check'}:
         action = 'lint'
-    elif arg in {'m', 'minimize', '-m', '--minimize'}:
-        action = 'minimize'
-    elif arg in {'p', 'pretty', '-p', '--pretty'}:
-        action = 'pretty'
+    elif arg in {'f', 'format', '-f', '--format'}:
+        action = 'format'
     if action is None:
         action = 'lint'
     else:
@@ -574,6 +639,6 @@ Letter options may be prefixed by - and word options by -- e.g., -l or \
             if action == 'lint':
                 oddl.check()
             else:
-                oddl.save(minimize=action == 'minimize')
+                oddl.save()
         except Error as err:
             print(err)
