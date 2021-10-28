@@ -195,6 +195,15 @@ class Structure:
 
 class PrimitiveStructure(Structure):
 
+    def __init__(self, datatype):
+        super().__init__(datatype)
+        self.datalist = None
+        self.dataarraylistsize = None # None means unlimited else >0
+        self.dataarrayliststates = False
+        self.dataarraylist = None # list of (state, {arraylist}) pairs
+                                  # -or- list of {arraylist}s
+
+
     def write(self, out, indent):
         out.write(f'{indent}{self.datatype}')
         if self.name is not None:
@@ -310,17 +319,22 @@ class Parser:
         # |
         # name? "{" data-list? "}"
         # NOTE data-list and data-array-list are lists of elements of the
-        # same type, i.e., of typename type
+        # same type, i.e., of datatype type
         text = self.advance(optional,
                             'expected primitive structure content')
         if not text:
             return
         if text[0] == '[':
             text = self.expect('[')
-            # TODO parse_int ...
-            # if text[0] != ']':
-            #   self.error(...)
-            # optional star
+            value = self.parse_number()
+            if isinstance(value, Real):
+                self.error('expected integer')
+            self.current.dataarraylistsize = value
+            text = self.expect(']')
+            if text.startswith('*'):
+                self.current.dataarrayliststates = True
+                self.pos += 1
+                text = text[1:]
             # name = self.parse_name(optional=True)
             # if name:
             #   pass # where does this name go?
