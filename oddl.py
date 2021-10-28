@@ -309,6 +309,8 @@ class Parser:
         # "[" integer-literal "]" "*"? name? "{" data-array-list? "}"
         # |
         # name? "{" data-list? "}"
+        # NOTE data-list and data-array-list are lists of elements of the
+        # same type, i.e., of typename type
         text = self.advance(optional,
                             'expected primitive structure content')
         if not text:
