@@ -1,5 +1,7 @@
 # oddl
 
+**###Abandoned###**
+
 _Pre-alpha software, work in progress!_
 
 _Prior to version 1.0.0 the API is completely unstable._
